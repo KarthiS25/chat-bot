@@ -16,3 +16,4 @@ librosa
 python-dotenv
 sentencepiece
 datasets
+edge-tts

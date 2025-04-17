@@ -1,44 +1,37 @@
 import os
-from dotenv import load_dotenv
 from langchain_huggingface import HuggingFaceEndpoint
 import streamlit as st
+import pyttsx3
+import speech_recognition as sr
+import whisper
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from streamlit_mic_recorder import mic_recorder, speech_to_text
-import time
-import pyttsx3
+from dotenv import load_dotenv
 
-import speech_recognition as sr
-from pydub import AudioSegment
-
-import whisper
-import sounddevice as sd
-import numpy as np
-import wave
-import streamlit as st
-import threading
-from transformers import SpeechT5Processor, SpeechT5ForTextToSpeech, SpeechT5HifiGan
-from IPython.display import Audio
-from datasets import load_dataset
-import torch
-import io
-import soundfile as sf
-
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-processor = SpeechT5Processor.from_pretrained("microsoft/speecht5_tts")
-audio_model = SpeechT5ForTextToSpeech.from_pretrained("microsoft/speecht5_tts").to(device)
-embeddings_dataset = load_dataset("Matthijs/cmu-arctic-xvectors", split="validation")
-speaker_embeddings = torch.tensor(embeddings_dataset[7306]["xvector"]).unsqueeze(0).to(device)
-vocoder = SpeechT5HifiGan.from_pretrained("microsoft/speecht5_hifigan")
-print("testtt")
+import asyncio
+import edge_tts
+import playsound
 
 model = whisper.load_model("base")
 load_dotenv()
 
-# Audio recording settings
-SAMPLE_RATE = 16000  # Sample rate
-CHANNELS = 1  # Mono audio
-FILENAME = "recorded_audio.wav"
+async def _text_to_speech_async(text, voice="en-IN-NeerjaExpressiveNeural", output="output.mp3"):
+    communicate = edge_tts.Communicate(text=text, voice=voice)
+    await communicate.save(output)
+    if text != st.session_state.starter_message:
+      st.markdown(text)
+    playsound.playsound(output)
+    os.remove(output)
+
+def text_to_speech(text, voice="en-IN-NeerjaExpressiveNeural"):
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        asyncio.run(_text_to_speech_async(text, voice))
+    else:
+        # If an event loop is already running (e.g., Streamlit), use create_task
+        asyncio.create_task(_text_to_speech_async(text, voice))
 
 # Transcribe audio
 def transcribe_audio(audio_data):
@@ -47,41 +40,12 @@ def transcribe_audio(audio_data):
     print("Extracted Text:", result["text"])
     return result["text"]
 
-def text_to_speech(response):
-    converter = pyttsx3.init()
-    converter.setProperty('rate', 200)
-    # converter.setProperty('volume', 0.8)
-    converter.setProperty('voice', 'ta-IN')
-    converter.say(response)
-    # time.sleep(0.5)
-    converter.runAndWait()
-    # inputs = processor(text=response, return_tensors="pt")
-    # speech = audio_model.generate_speech(inputs["input_ids"], speaker_embeddings, vocoder=vocoder)
-    # # st.audio(audio_bytes, format='audio/wav')
-    # sd.play(speech.numpy(), samplerate=16000)
-
-def get_audio_to_text():
-    print("Recording...")
-    r = sr.Recognizer()
-    with sr.Microphone() as source:
-      r.adjust_for_ambient_noise(source, duration=5)
-
-      audio_data = r.record(source, duration=5)
-      try:
-          data = transcribe_audio(audio_data)
-          return data
-      except sr.UnknownValueError:
-          print("Google Speech Recognition could not understand the audio.")
-      except sr.RequestError as e:
-          print(f"Could not request results from Google Speech Recognition service; {e}")
-      except Exception as e:
-          print(f"An error occurred: {e}")
-
 model_id="mistralai/Mistral-7B-Instruct-v0.3"
 
 def get_llm_hf_inference(model_id=model_id, max_new_tokens=128, temperature=0.1):
     llm = HuggingFaceEndpoint(
         repo_id=model_id,
+        task="text-generation",
         max_new_tokens=max_new_tokens,
         temperature=temperature,
         token = os.getenv("HF_TOKEN")
@@ -90,19 +54,18 @@ def get_llm_hf_inference(model_id=model_id, max_new_tokens=128, temperature=0.1)
 
 # Configure the Streamlit app
 st.set_page_config(page_title="Voice ChatBot", page_icon="🤖")
-st.title("🤖 Voice ChatBot")
+st.title("Voice ChatBot")
 reset_history = st.button("Reset Chat History")
-# st.markdown(f"*This is a simple chatbot that uses the HuggingFace transformers library to generate responses to your text input. It uses the {model_id}.*")
 
-# Initialize session state for avatars
+# Initialize avatars
 if "avatars" not in st.session_state:
     st.session_state.avatars = {'user': None, 'assistant': None}
 
-# Initialize session state for user text input
+# Initialize user text input
 if 'user_text' not in st.session_state:
     st.session_state.user_text = None
 
-# Initialize session state for model parameters
+# Initialize model parameters
 if "max_response_length" not in st.session_state:
     st.session_state.max_response_length = 256
 
@@ -110,8 +73,8 @@ if "system_message" not in st.session_state:
     st.session_state.system_message = "friendly AI conversing with a human user"
 
 if "starter_message" not in st.session_state:
-    st.session_state.starter_message = "Hello, there! How can I help you today?"
-    
+    st.session_state.starter_message = "Hey! Ready to dive in? Tell me what you need."
+
 st.session_state.avatars['assistant'] = "💬"
 st.session_state.avatars['user'] = "👤"
 
@@ -200,6 +163,7 @@ with output_container:
             chat_history=st.session_state.chat_history,
             max_new_tokens=st.session_state.max_response_length,
         )
-        st.markdown(response)
-        print(response, "Response")
+      # st.markdown(response)
       text_to_speech(response)
+        # print(response, "Response")
+      # text_to_speech(response)
